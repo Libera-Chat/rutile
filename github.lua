@@ -148,7 +148,7 @@ local formatters = {
                 target = 'tag ' .. target
             end
         end
-        if target and body.head_commit.message then
+        if target and body.head_commit then
             body.x_target = target
             body.x_after = body.after:sub(1,9)
             body.x_action = format_action(body.forced and 'force pushed' or 'pushed')
