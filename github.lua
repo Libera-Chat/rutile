@@ -600,6 +600,9 @@ return {
                 error 'no such credential'
             end
             config.credentials[authid] = nil
+            for _, project in pairs(config.projects) do
+                project.authorized[authid] = nil
+            end
             save_config(config)
         end),
 
@@ -607,6 +610,9 @@ return {
             local project = config.projects[repo]
             if not project then
                 error 'no such project'
+            end
+            if not config.credentials[authid] then
+                error 'no such authid'
             end
             project.authorized[authid] = true
             save_config(config)
@@ -639,6 +645,7 @@ return {
             end
             config.projects[repo].channel = channel
             save_config(config)
+            join_channels()
         end),
 
         gh_drop_project = mkcommand('$g', function(repo, channel)
