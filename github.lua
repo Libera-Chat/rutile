@@ -278,7 +278,7 @@ local function do_notify(authid, delivery, event, raw_body)
     local full_name = body.repository and body.repository.full_name or body.organization.login
     local project = config.projects[full_name]
 
-    if authid and not project.authorized[authid] then
+    if authid and project and not project.authorized[authid] then
         return reply_forbidden()
     end
 
@@ -370,7 +370,13 @@ local function on_http(method, target, body, headers)
     for pattern, handler in pairs(routes) do
         local matches = {target:match(pattern)}
         if next(matches) then
-            return handler(headers or {}, method, body, table.unpack(matches))
+            local result = {pcall(handler, headers or {}, method, body, table.unpack(matches))}
+            if result[1] then
+                return table.unpack(result, 2, #result)
+            else
+                status('github', 'error: %s', result[2])
+                error(result[2])
+            end
         end
     end
 
