@@ -541,7 +541,7 @@ if GITHUB_HTTPD then
 end
 
 -- start up new httpd
-GITHUB_HTTPD = snowcone.start_httpd(config.port, on_http)
+GITHUB_HTTPD = snowcone.start_httpd('::1', config.port, on_http)
 background_resources[GITHUB_HTTPD] = 'close'
 
 -- When the plugin (re)loads and we're already connected then
