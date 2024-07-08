@@ -28,6 +28,17 @@ local tablex = require 'pl.tablex'
 --- @type Configuration, fun(configuration: Configuration)
 local config, save_config = ...
 
+-- Install a default configuration if one doesn't exist
+if not config then
+    config = {
+        projects = {},
+        debug = false,
+        credentials = {},
+        port = 8000,
+    }
+    save_config(config)
+end
+
 --#endregion
 --#region MESSAGE FORMATTING
 
@@ -576,6 +587,89 @@ return {
         --- disables debug mode
         gh_debug_off = mkcommand('', function()
             config.debug = false
+            save_config(config)
+        end),
+
+        gh_set_credential = mkcommand('$g $g', function(authid, secret)
+            config.credentials[authid] = secret
+            save_config(config)
+        end),
+
+        gh_drop_credential = mkcommand('$g', function(authid)
+            if not config.credentials[authid] then
+                error 'no such credential'
+            end
+            config.credentials[authid] = nil
+            save_config(config)
+        end),
+
+        gh_authorize = mkcommand('$g $g', function(repo, authid)
+            local project = config.projects[repo]
+            if not project then
+                error 'no such project'
+            end
+            project.authorized[authid] = true
+            save_config(config)
+        end),
+
+        gh_deauthorize = mkcommand('$g $g', function(repo, authid)
+            local project = config.projects[repo]
+            if not project then
+                error 'no such project'
+            end
+            project.authorized[authid] = nil
+            save_config(config)
+        end),
+
+        gh_add_project = mkcommand('$g $g', function(repo, channel)
+            if config.projects[repo] then
+                error 'project exists'
+            end
+            config.projects[repo] = {
+                channel = channel,
+                authorized = {},
+                events = {},
+            }
+            save_config(config)
+        end),
+
+        gh_set_channel = mkcommand('$g $g', function(repo, channel)
+            if not config.projects[repo] then
+                error 'no such project'
+            end
+            config.projects[repo].channel = channel
+            save_config(config)
+        end),
+
+        gh_drop_project = mkcommand('$g', function(repo, channel)
+            if not config.projects[repo] then
+                error 'no such project'
+            end
+            config.projects[repo] = nil
+            save_config(config)
+        end),
+
+        gh_event_on = mkcommand('$g $g', function(repo, event)
+            if not config.projects[repo] then
+                error 'no such project'
+            end
+            config.projects[repo].events[event] = true
+            save_config(config)
+        end),
+
+        gh_event_off = mkcommand('$g $g', function(repo, event)
+            if not config.projects[repo] then
+                error 'no such project'
+            end
+            config.projects[repo].events[event] = nil
+            save_config(config)
+        end),
+
+        gh_set_port = mkcommand('$i', function(port)
+            if port <= 0 then
+                error 'bad port number'
+            end
+            config.port = port
             save_config(config)
         end),
     },
