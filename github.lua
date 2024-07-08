@@ -266,13 +266,14 @@ end
 --#endregion
 
 --- Process a raw JSON body as a GitHub notification.
---- @param authid string|nil Authentication identifier or nil to bypass check
+--- @param authid string? Authentication identifier or nil to bypass check
+--- @param delivery string? UUID for event
 --- @param event string Event name
 --- @param raw_body string JSON encoded object
 --- @return number status HTTP response status code
 --- @return string body HTTP response body
 --- @return headers headers HTTP response headers
-local function do_notify(authid, event, raw_body)
+local function do_notify(authid, delivery, event, raw_body)
     local body = json.decode(raw_body)
     local full_name = body.repository and body.repository.full_name or body.organization.login
     local project = config.projects[full_name]
@@ -282,9 +283,9 @@ local function do_notify(authid, event, raw_body)
     end
 
     -- Save body for debugging and replay, but delay saving the event until we've checked it's valid
-    if config.debug then
+    if config.debug and delivery then
         file.write(
-            path.join(cache_dir(), 'gh-notify-' .. event .. '-' .. hexbytes(sha256:digest(raw_body)) .. '.json'),
+            path.join(cache_dir(), 'gh-notify-' .. event .. '-' .. delivery .. '.json'),
             raw_body)
     end
 
@@ -337,7 +338,9 @@ local routes = {
             return reply_bad_request()
         end
 
-        return do_notify(notify_name, event, body)
+        local delivery = headers['x-github-delivery']
+
+        return do_notify(notify_name, delivery, event, body)
     end,
 
     ['^/source$'] = function(_, method)
@@ -575,7 +578,7 @@ return {
     commands = {
         --- replay an event using a cached request body
         gh_replay = mkcommand('$g $g', function(event, name)
-            do_notify(nil, event, file.read(path.join(cache_dir(), name)))
+            do_notify(nil, nil, event, file.read(path.join(cache_dir(), name)))
         end),
 
         --- enable saving request bodies for inspection and replay
