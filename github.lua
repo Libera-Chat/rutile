@@ -349,17 +349,6 @@ local routes = {
         end
         return reply_ok(file.read(plugin_manager:plugin_path('github', 'lua')))
     end,
-
-    --[[
-    ['^/auth$'] = function(headers, method)
-        local auth = headers['authorization']
-        if auth then
-            local user, pass = assert(snowcone.from_base64(auth:match '^Basic ([a-zA-Z0-9+/]*=?=?)$')):match '^([^:]*):(.*)$'
-            return reply_ok(string.format('%s %s', user, pass))
-        end
-        return 401, 'not authorized', {['Content-Type'] = 'text/plain', ['WWW-Authenticate'] = 'Basic realm=rutile'}
-    end,
-    ]]
 }
 
 --- Callback logic for an httpd event
@@ -651,7 +640,7 @@ return {
             join_channels()
         end),
 
-        gh_drop_project = mkcommand('$g', function(repo, channel)
+        gh_drop_project = mkcommand('$g', function(repo)
             if not config.projects[repo] then
                 error 'no such project'
             end
