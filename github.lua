@@ -110,6 +110,13 @@ local function format_action(action)
     end
 end
 
+--- Flatten all the whitespace in a string to single spaces
+--- @param str string String to flatten
+--- @return string
+local function format_body(str)
+    return (str:gsub('%s+', ' '))
+end
+
 --- Given a replacement and an interpolation string evaluate all of the
 --- interpolation placeholders.
 ---
@@ -152,17 +159,19 @@ local formatters = {
             body.x_target = target
             body.x_after = body.after:sub(1,9)
             body.x_action = format_action(body.forced and 'force pushed' or 'pushed')
+            body.x_summary = body.head_commit.message:match('^%s*([^\r\n]*)'):rstrip()
             return interpolate(body,
                 '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} {.x_after} to \x0302{.x_target}\x0f: \z
-                {.head_commit.message}')
+                {.x_summary}')
         end
     end,
     issue_comment = function(body)
         body.x_action = format_action(body.action)
+        body.x_body = format_body(body.comment.body)
         return interpolate(body,
             '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} comment on \z
             issue #{.issue.number} ({.issue.title}): \z
-            {.comment.body} - \x0305{.issue.html_url}')
+            {.x_body} - \x0305{.issue.html_url}')
     end,
     issues = function(body)
         if body.action == 'closed' and body.issue.state_reason == 'completed' then
@@ -175,26 +184,29 @@ local formatters = {
             issue #{.issue.number}: \x02{.issue.title}\x02 - \x0305{.issue.html_url}')
     end,
     pull_request_review = function(body)
+        body.x_body = format_body(body.review.body)
+        
         if body.action == 'submitted' and body.review.state == 'approved' then
             body.x_action = format_action('approved')
             return interpolate(body,
                 '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} \z
                 PR #{.pull_request.number} ({.pull_request.title}): \z
-                {.review.body} - \x0305{.pull_request.html_url}')
+                {.x_body} - \x0305{.pull_request.html_url}')
         end
 
         body.x_action = format_action(body.action)
         return interpolate(body,
             '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} review on \z
             PR #{.pull_request.number} ({.pull_request.title}): \z
-            {.review.body} - \x0305{.pull_request.html_url}')
+            {.x_body} - \x0305{.pull_request.html_url}')
     end,
     pull_request_review_comment = function(body)
         body.x_action = format_action(body.action)
+        body.x_body = format_body(body.comment.body)
         return interpolate(body,
             '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} comment on \z
             PR #{.pull_request.number} ({.pull_request.title}): \z
-            {.comment.body} - \x0305{.pull_request.html_url}')
+            {.x_body} - \x0305{.pull_request.html_url}')
     end,
     pull_request = function(body)
         if body.action == 'closed' and body.pull_request.merged then
@@ -370,12 +382,12 @@ local function on_http(method, target, body, headers)
     for pattern, handler in pairs(routes) do
         local matches = {target:match(pattern)}
         if next(matches) then
-            local result = {pcall(handler, headers or {}, method, body, table.unpack(matches))}
-            if result[1] then
-                return table.unpack(result, 2, #result)
+            local result, status, rbody, rheaders = pcall(handler, headers or {}, method, body, table.unpack(matches))
+            if result then
+                return status, rbody, rheaders
             else
-                status('github', 'error: %s', result[2])
-                error(result[2])
+                status('github', 'handler error: %s', status)
+                return 500, 'internal server error', plain_text_headers
             end
         end
     end
