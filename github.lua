@@ -119,6 +119,13 @@ local function format_body(str)
     return (str:gsub('%s+', ' '))
 end
 
+--- Render a truncated commit ID
+--- @param str string
+--- @return string
+local function format_commit_id(str)
+    return str:sub(1,9)
+end
+
 --- Given a replacement and an interpolation string evaluate all of the
 --- interpolation placeholders.
 ---
@@ -165,16 +172,17 @@ local formatters = {
         end
         if target then
             body.x_target = target
-            body.x_after = body.after:sub(1,9)
+            body.x_after = format_commit_id(body.after)
             body.x_action = format_action(body.forced and 'force pushed' or 'pushed')
             body.x_summary = body.head_commit.message:match('^%s*([^\r\n]*)'):rstrip()
             return interpolate(body,
                 action_prefix .. '{.x_after} to \x0302{.x_target}\x0f: {.x_summary}')
         end
     end,
+
     issue_comment = function(body)
         body.x_body = format_body(body.comment.body)
-        if body.action == 'opened' then
+        if body.action == 'created' then
             body.x_action = format_action('commented')
             return interpolate(body,
                 action_prefix .. 'on issue #{.issue.number} ({.issue.title}): \z
@@ -183,6 +191,22 @@ local formatters = {
             body.x_action = format_action(body.action)
             return interpolate(body,
                 action_prefix .. 'comment on issue #{.issue.number} ({.issue.title}): \z
+                {.x_body} - \x0308{.comment.html_url}')
+        end
+    end,
+
+    commit_comment = function(body)
+        body.x_body = format_body(body.comment.body)
+        body.x_commit_id = format_commit_id(body.comment.commit_id)
+        if body.action == 'created' then
+            body.x_action = format_action('commented')
+            return interpolate(body,
+                action_prefix .. 'on commit {.x_commit_id}: \z
+                {.x_body} - \x0308{.comment.html_url}')
+        else
+            body.x_action = format_action(body.action)
+            return interpolate(body,
+                action_prefix .. 'comment on commit {.x_commit_id}: \z
                 {.x_body} - \x0308{.comment.html_url}')
         end
     end,
@@ -214,7 +238,7 @@ local formatters = {
     end,
     pull_request_review_comment = function(body)
         body.x_body = format_body(body.comment.body)
-        if body.action == 'opened' then
+        if body.action == 'created' then
             body.x_action = format_action('commented')
             return interpolate(body,
                 action_prefix .. 'on PR #{.pull_request.number} ({.pull_request.title}): \z
