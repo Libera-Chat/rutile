@@ -41,6 +41,12 @@ if not config then
     save_config(config)
 end
 
+-- Populate a set of all the valid event names
+local all_events = {}
+for event in io.lines(plugin_manager:plugin_path('github', 'events.txt')) do
+    all_events[event] = true
+end
+
 --#endregion
 --#region MESSAGE FORMATTING
 
@@ -445,6 +451,11 @@ end
 --#endregion
 --#region IRC LOGIC
 
+--- Break up the keys of a table into multiple lines trying to keep them under 400 characters long
+--- @param tab table Table whose keys are enumerated
+--- @param prefix string? Prefix to add to first line of output
+--- @param sep string? Element separator defaulting to space
+--- @return string[] lines
 local function keys_as_lines(tab, prefix, sep)
     local lines = {}
     local acc = {}
@@ -495,6 +506,7 @@ local help_strings = {
     events = {'events <project> - List all of the configured events for the project'},
     event_on = {'event_on <project> <event>[:<action>] - Start announcing an event for a project'},
     event_off = {'event_off <project> <event>[:<action>] - Stop announcing an event for a project'},
+    list_events = {'list_events [search] - list all valid event names optionally filtered search term'},
     help = {'help [command] - Print help for a command or list the available commands'},
 }
 
@@ -511,28 +523,51 @@ local irc_commands = {
         end
     end,
 
+    --- List all the events available to be announced
+    --- @type fun(search: string): string[]
+    list_events = function(search)
+        local events
+        if search then
+            events = {}
+            for event in pairs(all_events) do
+                if event:find(search, 1, true) then
+                    events[event] = true
+                end
+            end
+        else
+            events = all_events
+        end
+        return keys_as_lines(events, 'Events:')
+    end,
+
     --- Enable reporting an event for a specific repository
     --- @type fun(repo: string, event: string): string[]
     event_on = function(repo, event)
-        -- Check if we have a formatter for this event
-        local prefix = event:match '^[^:]*'
-        if not formatters[prefix] then
-            return {'event not yet supported'}
-        end
 
         local project = config.projects[repo]
         if not project then
-            return {'no such project'}
+            return {'No such project'}
+        end
+
+        -- Check that the event is in the GitHub API
+        if not all_events[event] then
+            return {'Unknown event'}
+        end
+
+        -- Check if we have a formatter for this event
+        local prefix = event:match '^[^:]*'
+        if not formatters[prefix] then
+            return {'Event not yet implemented'}
         end
 
         local old = project.events[event]
         if old then
-            return {'already enabled'}
+            return {'Event already enabled'}
         end
 
         project.events[event] = true
         save_config(config)
-        return {'event enabled'}
+        return {'Event enabled'}
     end,
 
     --- Disable reporting an event for a specific repository
@@ -540,17 +575,22 @@ local irc_commands = {
     event_off = function(repo, event)
         local project = config.projects[repo]
         if not project then
-            return {'no such project'}
+            return {'No such project'}
+        end
+
+        -- Check that the event is in the GitHub API
+        if not all_events[event] then
+            return {'Unknown event'}
         end
 
         local old = project.events[event]
         if not old then
-            return {'already disabled'}
+            return {'Event already disabled'}
         end
 
         project.events[event] = nil
         save_config(config)
-        return {'event disabled'}
+        return {'Event disabled'}
     end,
 
     --- List all the configured projects
