@@ -24,6 +24,8 @@ local Set = require 'pl.Set'
 local sha256 = myopenssl.get_digest 'sha256'
 local tablex = require 'pl.tablex'
 
+local repo_url = 'https://github.com/Libera-Chat/rutile'
+
 --- Snowcone plugin configuration
 --- @type Configuration, fun(configuration: Configuration)
 local config, save_config = ...
@@ -72,7 +74,7 @@ local resume_actions = Set{
 
 --- Actions that initiate a new workflow
 local creation_actions = Set{
-    "created", "opened",
+    "created", "opened", "commented"
 }
 
 --- Actions that end a workflow
@@ -102,7 +104,7 @@ local function format_action(action)
     elseif negative_actions[action] then
         return '\x02\x0304' .. action .. '\x0f'
     elseif important_actions[action] then
-        return '\x02\x0305' .. action .. '\x0f'
+        return '\x02\x0308' .. action .. '\x0f'
     elseif resume_actions[action] then
         return '\x02\x0306' .. action .. '\x0f'
     else
@@ -144,10 +146,16 @@ local function interpolate(obj, str)
     end))
 end
 
+local common_prefix = '[{.repository.owner.login}/\x02{.repository.name}\x02] '
+local action_prefix = common_prefix .. '\x02{.sender.login}\x02 {#.x_action} '
+
 --- Functions for generating an announcement message for each supported event type
 --- @type table<string, fun(body: table): string?>
 local formatters = {
     push = function(body)
+        if not body.head_commit then
+            return
+        end
         local target = body.ref:match('^refs/heads/(.*)$')
         if not target then
             target = body.ref:match('^refs/tags/(.*)$')
@@ -155,24 +163,30 @@ local formatters = {
                 target = 'tag ' .. target
             end
         end
-        if target and body.head_commit then
+        if target then
             body.x_target = target
             body.x_after = body.after:sub(1,9)
             body.x_action = format_action(body.forced and 'force pushed' or 'pushed')
             body.x_summary = body.head_commit.message:match('^%s*([^\r\n]*)'):rstrip()
             return interpolate(body,
-                '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} {.x_after} to \x0302{.x_target}\x0f: \z
-                {.x_summary}')
+                action_prefix .. '{.x_after} to \x0302{.x_target}\x0f: {.x_summary}')
         end
     end,
     issue_comment = function(body)
-        body.x_action = format_action(body.action)
         body.x_body = format_body(body.comment.body)
-        return interpolate(body,
-            '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} comment on \z
-            issue #{.issue.number} ({.issue.title}): \z
-            {.x_body} - \x0305{.issue.html_url}')
+        if body.action == 'opened' then
+            body.x_action = format_action('commented')
+            return interpolate(body,
+                action_prefix .. 'on issue #{.issue.number} ({.issue.title}): \z
+                {.x_body} - \x0308{.comment.html_url}')
+        else
+            body.x_action = format_action(body.action)
+            return interpolate(body,
+                action_prefix .. 'comment on issue #{.issue.number} ({.issue.title}): \z
+                {.x_body} - \x0308{.comment.html_url}')
+        end
     end,
+
     issues = function(body)
         if body.action == 'closed' and body.issue.state_reason == 'completed' then
             body.x_action = format_action('resolved')
@@ -180,33 +194,37 @@ local formatters = {
             body.x_action = format_action(body.action)
         end
         return interpolate(body,
-            '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} \z
-            issue #{.issue.number}: \x02{.issue.title}\x02 - \x0305{.issue.html_url}')
+            action_prefix .. 'issue #{.issue.number}: \x02{.issue.title}\x02 - \x0308{.issue.html_url}')
     end,
+
     pull_request_review = function(body)
         body.x_body = format_body(body.review.body)
-        
         if body.action == 'submitted' and body.review.state == 'approved' then
             body.x_action = format_action('approved')
             return interpolate(body,
-                '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} \z
+                action_prefix .. 'PR #{.pull_request.number} ({.pull_request.title}): \z
+                {.x_body} - \x0308{.review.html_url}')
+        else
+            body.x_action = format_action(body.action)
+            return interpolate(body,
+                action_prefix .. 'review on \z
                 PR #{.pull_request.number} ({.pull_request.title}): \z
-                {.x_body} - \x0305{.pull_request.html_url}')
+                {.x_body} - \x0308{.review.html_url}')
         end
-
-        body.x_action = format_action(body.action)
-        return interpolate(body,
-            '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} review on \z
-            PR #{.pull_request.number} ({.pull_request.title}): \z
-            {.x_body} - \x0305{.pull_request.html_url}')
     end,
     pull_request_review_comment = function(body)
-        body.x_action = format_action(body.action)
         body.x_body = format_body(body.comment.body)
-        return interpolate(body,
-            '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} comment on \z
-            PR #{.pull_request.number} ({.pull_request.title}): \z
-            {.x_body} - \x0305{.pull_request.html_url}')
+        if body.action == 'opened' then
+            body.x_action = format_action('commented')
+            return interpolate(body,
+                action_prefix .. 'on PR #{.pull_request.number} ({.pull_request.title}): \z
+                {.x_body} - \x0308{.comment.html_url}')
+        else
+            body.x_action = format_action(body.action)
+            return interpolate(body,
+                action_prefix .. 'comment on PR #{.pull_request.number} ({.pull_request.title}): \z
+                {.x_body} - \x0308{.comment.html_url}')
+        end
     end,
     pull_request = function(body)
         if body.action == 'closed' and body.pull_request.merged then
@@ -215,15 +233,13 @@ local formatters = {
             body.x_action = format_action(body.action)
         end
         return interpolate(body,
-            '{.repository.full_name}: \x02{.sender.login}\x02 {#.x_action} \z
-            PR #{.pull_request.number}: \z
-            {.pull_request.title} - \x0305{.pull_request.html_url}')
+            action_prefix .. 'PR #{.pull_request.number}: {.pull_request.title} - \x0308{.pull_request.html_url}')
     end,
 
     -- Special event for r10k deployments
     deploy = function(body)
         return interpolate(body,
-            '{.repository.full_name}: environment \x02{.environment}\x02 deployed')
+            common_prefix .. 'environment \x02{.environment}\x02 deployed')
     end,
 }
 
@@ -253,6 +269,10 @@ end
 
 local function reply_no_content()
     return 204, '', plain_text_headers
+end
+
+local function reply_found(location)
+    return 302, 'document at ' .. location, {Location = location, ["Content-Type"] = "text/plain"}
 end
 
 local function reply_bad_request()
@@ -336,30 +356,33 @@ local routes = {
             return reply_method_not_allowed()
         end
 
-        do -- enforce authentication
-            local secret = config.credentials[notify_name]
-            local signature = headers['x-hub-signature-256']
-            local expected_signature = 'sha256=' .. hexbytes(sha256:hmac(body, secret))
-            if expected_signature ~= signature then
-                return reply_unauthorized()
-            end
-        end
-
         local event = headers['x-github-event']
-        if not event then
+        local delivery = headers['x-github-delivery']
+        local signature = headers['x-hub-signature-256']
+        if not (event and delivery and signature) then
             return reply_bad_request()
         end
 
-        local delivery = headers['x-github-delivery']
+        local secret = config.credentials[notify_name]
+        if not (secret and signature == 'sha256=' .. hexbytes(sha256:hmac(body, secret))) then
+            return reply_unauthorized()
+        end
 
         return do_notify(notify_name, delivery, event, body)
     end,
 
-    ['^/source$'] = function(_, method)
+    ['^/$'] = function(_, method)
         if method ~= 'GET' then
             return reply_method_not_allowed()
         end
-        return reply_ok(file.read(plugin_manager:plugin_path('github', 'lua')))
+        return reply_found(repo_url)
+    end,
+
+    ['^/robots.txt$'] = function(_, method)
+        if method ~= 'GET' then
+            return reply_method_not_allowed()
+        end
+        return reply_ok('User-agent: *\nDisallow: /\n')
     end,
 }
 
@@ -398,6 +421,34 @@ end
 --#endregion
 --#region IRC LOGIC
 
+local function keys_as_lines(tab, prefix, sep)
+    local lines = {}
+    local acc = {}
+    local n = 0
+
+    if prefix then
+        table.insert(acc, prefix)
+        n = #prefix
+    end
+
+    for name in tablex.sort(tab) do
+        if next(acc) and #name + 1 + n > 400 then
+            table.insert(lines, table.concat(acc, sep or ' '))
+            acc = {}
+            n = 0
+        end
+
+        table.insert(acc, name)
+        n = n + #name
+    end
+
+    if next(acc) then
+        table.insert(lines, table.concat(acc, sep or ' '))
+    end
+
+    return lines
+end
+
 --- Issue a JOIN command for any channels we're not in that we need to be able to announce in.
 local function join_channels()
     local channels = {}
@@ -407,9 +458,9 @@ local function join_channels()
             channels[channel] = true
         end
     end
-    if next(channels) then
-        -- we shouldn't be in *that many* channels that we need to break this up
-        send('JOIN', table.concat(tablex.keys(channels), ','))
+
+    for _, line in ipairs(keys_as_lines(channels, nil, ',')) do
+        send('JOIN', line)
     end
 end
 
@@ -422,33 +473,6 @@ local help_strings = {
     event_off = {'event_off <project> <event>[:<action>] - Stop announcing an event for a project'},
     help = {'help [command] - Print help for a command or list the available commands'},
 }
-
-local function keys_as_lines(tab, prefix)
-    local lines = {}
-    local acc = {}
-    local n = 0
-
-    if prefix then
-        table.insert(acc, prefix)
-    end
-
-    for name in tablex.sort(tab) do
-        if next(acc) and #name + 1 + n > 400 then
-            table.insert(lines, table.concat(acc, ' '))
-            acc = {}
-            n = 0
-        end
-
-        table.insert(acc, name)
-        n = n + #name
-    end
-
-    if next(acc) then
-        table.insert(lines, table.concat(acc, ' '))
-    end
-
-    return lines
-end
 
 --- Commands available to staff members chatting with the bot in private message
 local irc_commands = {
