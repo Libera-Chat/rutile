@@ -150,6 +150,9 @@ local function interpolate(obj, str)
             local key
             key, rest = rest:match '^%.([_%a]*)(.*)$'
             cursor = cursor[key]
+            if cursor == nil then
+                error ('bad interpolation {' .. expr .. '} in: ' .. str)
+            end
         end
         cursor = truncate(tostring(cursor), 100)
         if raw == '' then
@@ -389,7 +392,12 @@ local routes = {
         local event = headers['x-github-event']
         local delivery = headers['x-github-delivery']
         local signature = headers['x-hub-signature-256']
-        if not (event and delivery and signature) then
+
+        if not delivery then
+            delivery = sha256:digest(body)
+        end
+
+        if not (event and signature) then
             return reply_bad_request()
         end
 
@@ -435,11 +443,11 @@ local function on_http(method, target, body, headers)
     for pattern, handler in pairs(routes) do
         local matches = {target:match(pattern)}
         if next(matches) then
-            local result, status, rbody, rheaders = pcall(handler, headers or {}, method, body, table.unpack(matches))
+            local result, code, rbody, rheaders = pcall(handler, headers or {}, method, body, table.unpack(matches))
             if result then
-                return status, rbody, rheaders
+                return code, rbody, rheaders
             else
-                status('github', 'handler error: %s', status)
+                status('github', 'handler error: %s', code)
                 return 500, 'internal server error', plain_text_headers
             end
         end
