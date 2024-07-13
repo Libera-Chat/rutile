@@ -63,3 +63,15 @@ Project = {}
 --- @field debug boolean
 --- @field projects table<string, Project>
 Configuration = {}
+
+--- @class Window
+Window = {}
+
+--- @param ... (string|number)
+function Window:waddstr(...) end
+
+--- @param win Window
+function blue(win) end
+
+--- @param win Window
+function normal(win) end

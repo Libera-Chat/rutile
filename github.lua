@@ -245,6 +245,7 @@ local formatters = {
                 {.x_body} - \x0308{.review.html_url}')
         end
     end,
+
     pull_request_review_comment = function(body)
         body.x_body = format_body(body.comment.body)
         if body.action == 'created' then
@@ -259,6 +260,7 @@ local formatters = {
                 {.x_body} - \x0308{.comment.html_url}')
         end
     end,
+
     pull_request = function(body)
         if body.action == 'closed' and body.pull_request.merged then
             body.x_action = format_action('merged')
@@ -677,6 +679,17 @@ return {
         end
     end,
 
+    --- Render the plugin widget to the given window
+    --- @type fun(win: Window)
+    widget = function(win)
+        blue(win)
+        win:waddstr('    Project                                  Channel              Events\n')
+        normal(win)
+        for key, project in tablex.sort(config.projects) do
+            win:waddstr(string.format('    %-40s %-20s %d\n', key, project.channel, tablex.size(project.events)))
+        end
+    end,
+
     --- in-client commands
     commands = {
         --- replay an event using a cached request body
@@ -775,6 +788,22 @@ return {
                 error 'no such project'
             end
             config.projects[repo].events[event] = nil
+            save_config(config)
+        end),
+
+        --- Short-cut when setting up a new project to copy the settings of a previous project
+        gh_event_copy_from_to = mkcommand('$g $g', function(repo_src, repo_dst)
+            local src = config.projects[repo_src]
+            if not src then
+                error 'no such source project'
+            end
+
+            local dst = config.projects[repo_dst]
+            if not dst then
+                error 'no such destination project'
+            end
+
+            dst.events = tablex.copy(src.events)
             save_config(config)
         end),
 
