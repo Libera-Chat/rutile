@@ -118,13 +118,6 @@ local function format_action(action)
     end
 end
 
---- Flatten all the whitespace in a string to single spaces
---- @param str string String to flatten
---- @return string
-local function format_body(str)
-    return (str:gsub('%s+', ' '))
-end
-
 --- Render a truncated commit ID
 --- @param str string
 --- @return string
@@ -154,9 +147,10 @@ local function interpolate(obj, str)
                 error ('bad interpolation {' .. expr .. '} in: ' .. str)
             end
         end
-        cursor = truncate(tostring(cursor), 100)
+        cursor = tostring(cursor)
         if raw == '' then
-            cursor = scrub(cursor)
+            -- trim and consolidate whitespace, truncate, scrub controls
+            return scrub(truncate(cursor:gsub('%s+', ' '):match('^ ?(.-) ?$'), 100))
         end
         return cursor
     end))
@@ -183,40 +177,35 @@ local formatters = {
             body.x_target = target
             body.x_after = format_commit_id(body.after)
             body.x_action = format_action(body.forced and 'force pushed' or 'pushed')
-            body.x_summary = body.head_commit.message:match('^%s*([^\r\n]*)'):rstrip()
+            body.x_summary = body.head_commit.message:match('^%s*([^\r\n]*)')
             return interpolate(body,
                 action_prefix .. '{.x_after} to \x0302{.x_target}\x0f: {.x_summary}')
         end
     end,
 
     issue_comment = function(body)
-        body.x_body = format_body(body.comment.body)
         if body.action == 'created' then
             body.x_action = format_action('commented')
             return interpolate(body,
-                action_prefix .. 'on issue #{.issue.number} ({.issue.title}): \z
-                {.x_body} - \x0308{.comment.html_url}')
+                action_prefix .. 'on issue #{#.issue.number} ({.issue.title}): {.comment.body} - \x0308{#.comment.html_url}')
         else
             body.x_action = format_action(body.action)
             return interpolate(body,
-                action_prefix .. 'comment on issue #{.issue.number} ({.issue.title}): \z
-                {.x_body} - \x0308{.comment.html_url}')
+                action_prefix .. 'comment on issue #{#.issue.number} ({.issue.title}): \z
+                {.comment.body} - \x0308{#.comment.html_url}')
         end
     end,
 
     commit_comment = function(body)
-        body.x_body = format_body(body.comment.body)
         body.x_commit_id = format_commit_id(body.comment.commit_id)
         if body.action == 'created' then
             body.x_action = format_action('commented')
             return interpolate(body,
-                action_prefix .. 'on commit {.x_commit_id}: \z
-                {.x_body} - \x0308{.comment.html_url}')
+                action_prefix .. 'on commit {#.x_commit_id}: {.comment.body} - \x0308{#.comment.html_url}')
         else
             body.x_action = format_action(body.action)
             return interpolate(body,
-                action_prefix .. 'comment on commit {.x_commit_id}: \z
-                {.x_body} - \x0308{.comment.html_url}')
+                action_prefix .. 'comment on commit {#.x_commit_id}: {.comment.body} - \x0308{#.comment.html_url}')
         end
     end,
 
@@ -227,37 +216,34 @@ local formatters = {
             body.x_action = format_action(body.action)
         end
         return interpolate(body,
-            action_prefix .. 'issue #{.issue.number}: \x02{.issue.title}\x02 - \x0308{.issue.html_url}')
+            action_prefix .. 'issue #{#.issue.number}: \x02{.issue.title}\x02 - \x0308{#.issue.html_url}')
     end,
 
     pull_request_review = function(body)
-        body.x_body = format_body(body.review.body)
         if body.action == 'submitted' and body.review.state == 'approved' then
             body.x_action = format_action('approved')
             return interpolate(body,
-                action_prefix .. 'PR #{.pull_request.number} ({.pull_request.title}): \z
-                {.x_body} - \x0308{.review.html_url}')
+                action_prefix .. 'PR #{#.pull_request.number} ({.pull_request.title}): \z
+                {.review.body} - \x0308{#.review.html_url}')
         else
             body.x_action = format_action(body.action)
             return interpolate(body,
                 action_prefix .. 'review on \z
-                PR #{.pull_request.number} ({.pull_request.title}): \z
-                {.x_body} - \x0308{.review.html_url}')
+                PR #{#.pull_request.number} ({.pull_request.title}): {.review.body} - \x0308{#.review.html_url}')
         end
     end,
 
     pull_request_review_comment = function(body)
-        body.x_body = format_body(body.comment.body)
         if body.action == 'created' then
             body.x_action = format_action('commented')
             return interpolate(body,
-                action_prefix .. 'on PR #{.pull_request.number} ({.pull_request.title}): \z
-                {.x_body} - \x0308{.comment.html_url}')
+                action_prefix .. 'on PR #{#.pull_request.number} ({.pull_request.title}): \z
+                {.comment.body} - \x0308{#.comment.html_url}')
         else
             body.x_action = format_action(body.action)
             return interpolate(body,
-                action_prefix .. 'comment on PR #{.pull_request.number} ({.pull_request.title}): \z
-                {.x_body} - \x0308{.comment.html_url}')
+                action_prefix .. 'comment on PR #{#.pull_request.number} ({.pull_request.title}): \z
+                {.comment.body} - \x0308{#.comment.html_url}')
         end
     end,
 
@@ -268,7 +254,7 @@ local formatters = {
             body.x_action = format_action(body.action)
         end
         return interpolate(body,
-            action_prefix .. 'PR #{.pull_request.number}: {.pull_request.title} - \x0308{.pull_request.html_url}')
+            action_prefix .. 'PR #{#.pull_request.number}: {.pull_request.title} - \x0308{#.pull_request.html_url}')
     end,
 
     -- Special event for r10k deployments
