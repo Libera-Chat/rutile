@@ -118,11 +118,24 @@ local function format_action(action)
     end
 end
 
+local function format_conclusion(conclusion)
+    local messages = {
+        success = '\x02\x0303success\x0f',
+        failure = '\x02\x0304failure\x0f',
+        neutral = '\x02neutral\x0f',
+        cancelled = '\x02cancelled\x0f',
+        timed_out = '\x02\x0304timed out\x0f',
+        action_required = '\x02\x04action required\x0f',
+        stale = '\x02stale\x0f',
+    }
+    return messages[conclusion] or conclusion
+end
+
 --- Render a truncated commit ID
 --- @param str string
 --- @return string
 local function format_commit_id(str)
-    return str:sub(1,9)
+    return '\x1d' .. str:sub(1,9) .. '\x0f'
 end
 
 --- Given a replacement and an interpolation string evaluate all of the
@@ -255,6 +268,26 @@ local formatters = {
         end
         return interpolate(body,
             action_prefix .. 'PR #{#.pull_request.number}: {.pull_request.title} - \x0308{#.pull_request.html_url}')
+    end,
+
+    check_suite = function(body)
+        local top_pr = body.check_suite.pull_requests[1]
+        body.x_commit_id = format_commit_id(body.check_suite.head_sha)
+        if top_pr then
+            body.x_target = interpolate(top_pr, "PR #{#.number}")
+        elseif body.head_branch then
+            body.x_target = interpolate(body, '\x0302{.head_branch}\x0f')
+        else
+            body.x_target = 'commit'
+        end
+
+        if body.action == 'completed' then
+            body.x_action = format_conclusion(body.check_suite.conclusion)
+        else
+            body.x_action = format_action(body.action)
+        end
+        return interpolate(body,
+            common_prefix .. 'Check suite \x02{.check_suite.app.name}\x02 for {#.x_target} {#.x_commit_id}: {#.x_action}')
     end,
 
     -- Special event for r10k deployments
