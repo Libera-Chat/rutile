@@ -192,7 +192,7 @@ local formatters = {
             body.x_action = format_action(body.forced and 'force pushed' or 'pushed')
             body.x_summary = body.head_commit.message:match('^%s*([^\r\n]*)')
             return interpolate(body,
-                action_prefix .. '{.x_after} to \x0302{.x_target}\x0f: {.x_summary}')
+                action_prefix .. '{#.x_after} to \x0302{.x_target}\x0f: {.x_summary}')
         end
     end,
 
