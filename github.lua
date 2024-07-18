@@ -235,14 +235,26 @@ local formatters = {
     pull_request_review = function(body)
         if body.action == 'submitted' and body.review.state == 'approved' then
             body.x_action = format_action('approved')
-            return interpolate(body,
-                action_prefix .. 'PR #{#.pull_request.number} ({.pull_request.title}): \z
-                {.review.body} - \x0308{#.review.html_url}')
+            if body.review.body then
+                return interpolate(body,
+                    action_prefix .. 'PR #{#.pull_request.number} ({.pull_request.title}): \z
+                    {.review.body} - \x0308{#.review.html_url}')
+            else
+                return interpolate(body,
+                    action_prefix .. 'PR #{#.pull_request.number} ({.pull_request.title}) \z
+                    - \x0308{#.review.html_url}')
+            end
         else
             body.x_action = format_action(body.action)
-            return interpolate(body,
-                action_prefix .. 'review on \z
-                PR #{#.pull_request.number} ({.pull_request.title}): {.review.body} - \x0308{#.review.html_url}')
+            if body.review.body then
+                return interpolate(body,
+                    action_prefix .. 'review on \z
+                    PR #{#.pull_request.number} ({.pull_request.title}): {.review.body} - \x0308{#.review.html_url}')
+            else
+                return interpolate(body,
+                    action_prefix .. 'review on \z
+                    PR #{#.pull_request.number} ({.pull_request.title}) - \x0308{#.review.html_url}')
+            end
         end
     end,
 
