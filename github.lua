@@ -787,6 +787,7 @@ return {
                 events = {},
             }
             save_config(config)
+            join_channels()
         end),
 
         gh_set_channel = mkcommand('$g $g', function(repo, channel)
