@@ -31,15 +31,13 @@ local repo_url = 'https://github.com/Libera-Chat/rutile'
 local config, save_config = ...
 
 -- Install a default configuration if one doesn't exist
-if not config then
-    config = {
-        projects = {},
-        debug = false,
-        credentials = {},
-        port = 8000,
-    }
-    save_config(config)
-end
+if not config               then config             = {}    end
+if not config.projects      then config.projects    = {}    end
+if not config.credentials   then config.credentials = {}    end
+if not config.port          then config.port        = 8000  end
+if not config.mutes         then config.mutes       = {}    end
+if not config.next_mute     then config.next_mute   = 1     end
+save_config(config)
 
 -- Populate a set of all the valid event names
 local all_events = {}
@@ -71,6 +69,21 @@ local function truncate(str, limit)
     else
         return str
     end
+end
+
+local function pretty_seconds(x)
+    x = math.ceil(x / 60)
+
+    if x <= 0 then return 'now' end
+    local result = x%60 .. 'm'
+    x = x // 60
+
+    if x == 0 then return result end
+    result = x%24 .. 'h' .. result
+    x = x // 24
+
+    if x == 0 then return result end
+    return x .. 'd' .. result
 end
 
 --- Actions indicate a workflow has transitioned from closed to open
@@ -167,6 +180,25 @@ local function interpolate(obj, str)
         end
         return cursor
     end))
+end
+
+local function match_rule(rule, event, body)
+    for name, value in pairs(rule) do
+        local thing
+        if 'project' == name then
+            thing = body.repository and body.repository.full_name or body.organization.login
+        elseif 'sender' == name then
+            thing = body.sender and body.sender.login
+        elseif 'event' == name then
+            thing = event
+        elseif 'pr' == name then
+            thing = body.pull_request and body.pull_request.number
+        elseif 'issue' == name then
+            thing = body.issue and body.issue.number
+        end
+        if thing ~= value then return false end
+    end
+    return true
 end
 
 local common_prefix = '[{.repository.owner.login}/\x02{.repository.name}\x02] '
@@ -398,11 +430,22 @@ local function do_notify(authid, delivery, event, raw_body)
     local message
     if project and project.events[full_event] then
         local formatter = formatters[event]
-        if formatter then
-            message = formatter(body)
-        else
+        if not formatter then
             status('github', 'Error: No formatter for enabled event: %s', event)
+            return
         end
+
+        for mute_id, mute in pairs(config.mutes) do
+            if mute.expire and mute.expire >= os.time() then
+                config.mutes[mute_id] = nil
+                status('github', 'Mute %d expired', full_name, full_event, mute_id)
+            elseif match_rule(mute.rule, full_event, body) then
+                status('github', 'Skipping %s %s due to mute %d', full_name, full_event, mute_id)
+                return
+            end
+        end
+
+        message = formatter(body)
     end
 
     if message then
@@ -545,11 +588,19 @@ end
 --- @type table<string, string[]>
 local help_strings = {
     projects = {'projects - List all of the configured project names'},
-    events = {'events <project> - List all of the configured events for the project'},
-    event_on = {'event_on <project> <event>[:<action>] - Start announcing an event for a project'},
-    event_off = {'event_off <project> <event>[:<action>] - Stop announcing an event for a project'},
-    list_events = {'list_events [search] - list all valid event names optionally filtered search term'},
-    help = {'help [command] - Print help for a command or list the available commands'},
+    events = {'events <\x1fproject\x0f> - List all of the configured events for the project'},
+    event_on = {'event_on <\x1fproject\x0f> <\x1fevent\x0f>[:<\x1faction\x0f>] \z
+                - Start announcing an event for a project'},
+    event_off = {'event_off <\x1fproject\x0f> <\x1fevent\x0f>[:<\x1faction\x0f>] \z
+                - Stop announcing an event for a project'},
+    list_events = {'list_events [\x1fsearch\x0f] - list all valid event names optionally filtered search term'},
+    help = {'help [\x1fcommand\x0f] - Print help for a command or list the available commands'},
+    mute = {'mute [days=\x1fdays\x0f] [hours=\x1fhours\x0f] \z
+                  [project=\x1fproject\x0f] [sender=\x1fsender\x0f] \z
+                  [event=\x1fevent\x0f] \z
+                  [pr=\x1fpr\x0f] [issue=\x1fissue\x0f] - add a mute'},
+    unmute = {'unmute <\x1fid\x0f> - delete a mute'},
+    mutes = {'mutes - list current mutes'},
 }
 
 --- Commands available to staff members chatting with the bot in private message
@@ -650,6 +701,92 @@ local irc_commands = {
         end
         return keys_as_lines(project.events, 'Events:')
     end,
+
+    mute = function(...)
+        local mute = { rule = {} }
+        local seconds = 0
+
+        for _, arg in ipairs({...}) do
+            local k, v = arg:match('^([^ ]+)=([^ ]+)$')
+            if not k then
+                return {'Syntax error near: ' .. arg}
+            elseif 'days' == k then
+                local days = tonumber(v)
+                if not days then
+                    return {'Bad days: ' .. v}
+                end
+                seconds = days * 24 * 60 * 60
+            elseif 'hours' == k then
+                local hours = tonumber(v)
+                if not hours then
+                    return {'Bad hours: ' .. v}
+                end
+                seconds = hours * 60 * 60
+            elseif 'sender' == k then
+                mute.rule.sender = v
+            elseif 'project' == k then
+                if not config.projects[v] then
+                    return {'Unknown project: ' .. v}
+                end
+                mute.rule.project = v
+            elseif 'event' == k then
+                mute.rule.event = v
+            elseif 'pr' == k then
+                mute.rule.pr = tonumber(v)
+            elseif 'issue' == k then
+                mute.rule.issue = tonumber(k)
+            else
+                return {'Unknown parameter: ' .. k}
+            end
+        end
+
+        if not next(mute.rule) then
+            return {'No criteria specified'}
+        end
+
+        if seconds > 0 then
+            mute.expire = os.time() + seconds
+        end
+
+        local mute_id = config.next_mute
+        config.next_mute = mute_id + 1
+        config.mutes[mute_id] = mute
+        save_config(config)
+
+        return {'Added mute ' .. mute_id}
+    end,
+
+    unmute = function(id)
+        if config.mutes[tonumber(id)] then
+            config.mutes[tonumber(id)] = nil
+            save_config(config)
+            return {'Removed mute'}
+        else
+            return {'Mute not found'}
+        end
+    end,
+
+    mutes = function()
+        if not next(config.mutes) then
+            return {'No mutes'}
+        end
+
+        local result = {}
+        local i = 0
+        for mute_id, mute in tablex.sort(config.mutes) do
+            i = i + 1
+            local line = '\x02' .. mute_id .. '\x0f:'
+            local rule = mute.rule
+            if mute.expire  then line = line .. ' expire=\x02' .. pretty_seconds(mute.expire - os.time()) .. '\x0f' end
+            if rule.project then line = line .. ' project=\x02' .. rule.project .. '\x0f' end
+            if rule.sender  then line = line .. ' sender=\x02'  .. rule.sender  .. '\x0f' end
+            if rule.event   then line = line .. ' event=\x02'   .. rule.event   .. '\x0f' end
+            if rule.issue   then line = line .. ' issue=\x02'   .. rule.issue   .. '\x0f' end
+            if rule.pr      then line = line .. ' pr=\x02'      .. rule.pr      .. '\x0f' end
+            result[i] = line
+        end
+        return result
+    end,
 }
 
 --- Event handlers for incoming IRC messages
@@ -658,14 +795,14 @@ local irc_handlers = {
     --- Listen for private message commands from staff
     PRIVMSG = function(irc)
         -- Only accept commands from staff
-        if not irc.host:match '^libera/staff/' then return end
+        if not irc.host:match('^libera/staff/') then return end
 
         -- Only accept direct messages
         if irc[1] ~= irc_state.nick then return end
+
         local args = irc[2]:split()
         local handler = irc_commands[args[1]]
         if handler then
-            status('github', 'Command from %s@%s: %s', irc.nick, irc.host, irc[2])
             local reply = handler(table.unpack(args, 2))
             for _, line in ipairs(reply) do
                 send('NOTICE', irc.nick, line)
