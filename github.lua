@@ -436,9 +436,10 @@ local function do_notify(authid, delivery, event, raw_body)
         end
 
         for mute_id, mute in pairs(config.mutes) do
-            if mute.expire and mute.expire >= os.time() then
+            if mute.expire and mute.expire <= os.time() then
                 config.mutes[mute_id] = nil
-                status('github', 'Mute %d expired', full_name, full_event, mute_id)
+                save_config(config)
+                status('github', 'Mute %d expired', mute_id)
             elseif match_rule(mute.rule, full_event, body) then
                 status('github', 'Skipping %s %s due to mute %d', full_name, full_event, mute_id)
                 return
