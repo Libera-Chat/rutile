@@ -609,7 +609,7 @@ local irc_commands = {
     --- List all the commands or provide help text for a specific command
     --- @type fun(command: string?): string[]
     help = function(command)
-        local doc = help_strings[command]
+        local doc = help_strings[command:lower()]
         if doc then
             return doc
         else
@@ -709,6 +709,7 @@ local irc_commands = {
 
         for _, arg in ipairs({...}) do
             local k, v = arg:match('^([^ ]+)=([^ ]+)$')
+	    k = k:lower()
             if not k then
                 return {'Syntax error near: ' .. arg}
             elseif 'days' == k then
@@ -802,7 +803,7 @@ local irc_handlers = {
         if irc[1] ~= irc_state.nick then return end
 
         local args = irc[2]:split()
-        local handler = irc_commands[args[1]]
+        local handler = irc_commands[args[1]:lower()]
         if handler then
             local reply = handler(table.unpack(args, 2))
             for _, line in ipairs(reply) do
