@@ -230,14 +230,15 @@ local formatters = {
     end,
 
     issue_comment = function(body)
+        body.x_kind = body.issue.pull_request and 'PR' or 'issue' -- PRs are a special kind of issue.
         if body.action == 'created' then
             body.x_action = format_action('commented')
             return interpolate(body,
-                action_prefix .. 'on issue #{#.issue.number} ({.issue.title}): {.comment.body} - \x0308{#.comment.html_url}')
+                action_prefix .. 'on {#.x_kind} #{#.issue.number} ({.issue.title}): {.comment.body} - \x0308{#.comment.html_url}')
         else
             body.x_action = format_action(body.action)
             return interpolate(body,
-                action_prefix .. 'comment on issue #{#.issue.number} ({.issue.title}): \z
+                action_prefix .. 'comment on {#.x_kind} #{#.issue.number} ({.issue.title}): \z
                 {.comment.body} - \x0308{#.comment.html_url}')
         end
     end,
