@@ -32,6 +32,7 @@ local config, save_config = ...
 
 -- Install a default configuration if one doesn't exist
 if not config               then config             = {}    end
+if not config.debug         then config.debug       = false end
 if not config.projects      then config.projects    = {}    end
 if not config.credentials   then config.credentials = {}    end
 if not config.port          then config.port        = 8000  end
@@ -205,12 +206,15 @@ local common_prefix = '[{.repository.owner.login}/\x02{.repository.name}\x02] '
 local action_prefix = common_prefix .. '\x02{.sender.login}\x02 {#.x_action} '
 
 --- Functions for generating an announcement message for each supported event type
---- @type table<string, fun(body: table): string?>
+--- @type table<string, fun(body: table): string[]?>
 local formatters = {
     push = function(body)
         if not body.head_commit then
             return
         end
+
+        local n = #body.commits
+
         local target = body.ref:match('^refs/heads/(.*)$')
         if not target then
             target = body.ref:match('^refs/tags/(.*)$')
@@ -218,14 +222,32 @@ local formatters = {
                 target = 'tag ' .. target
             end
         end
+
         if target then
             body.x_target = target
             body.x_after = format_commit_id(body.after)
             body.x_action = format_action(body.forced and 'force pushed' or 'pushed')
-            body.x_summary = body.head_commit.message:match('^%s*([^\r\n]*)')
-            return interpolate(body,
-                action_prefix .. '{#.x_after} to \x0302{.x_target}\x0f: {.x_summary} \z
-                - \x0308{#.compare}')
+            body.x_summary = body.commits[n].message:match('^%s*([^\r\n]*)')
+
+            if n == 1 then
+                body.x_n = '1 commit'
+            else
+                body.x_n = n .. ' commits'
+            end
+
+            local messages = {interpolate(body,
+                action_prefix .. '{#.x_n} to \x0302{.x_target}\x0f {#.x_after}: {.x_summary} \z
+                - \x0308{#.compare}')}
+
+            for i = n-1, 1, -1 do
+                local repl = {
+                    x_id = format_commit_id(body.commits[i].id),
+                    x_summary = body.commits[i].message:match('^%s*([^\r\n]*)')
+                }
+                table.insert(messages, interpolate(repl, '... {#.x_id}: {.x_summary}'))
+            end
+
+            return messages
         end
     end,
 
@@ -233,13 +255,13 @@ local formatters = {
         body.x_kind = body.issue.pull_request and 'PR' or 'issue' -- PRs are a special kind of issue.
         if body.action == 'created' then
             body.x_action = format_action('commented')
-            return interpolate(body,
-                action_prefix .. 'on {#.x_kind} #{#.issue.number} ({.issue.title}): {.comment.body} - \x0308{#.comment.html_url}')
+            return {interpolate(body,
+                action_prefix .. 'on {#.x_kind} #{#.issue.number} ({.issue.title}): {.comment.body} - \x0308{#.comment.html_url}')}
         else
             body.x_action = format_action(body.action)
-            return interpolate(body,
+            return {interpolate(body,
                 action_prefix .. 'comment on {#.x_kind} #{#.issue.number} ({.issue.title}): \z
-                {.comment.body} - \x0308{#.comment.html_url}')
+                {.comment.body} - \x0308{#.comment.html_url}')}
         end
     end,
 
@@ -247,12 +269,12 @@ local formatters = {
         body.x_commit_id = format_commit_id(body.comment.commit_id)
         if body.action == 'created' then
             body.x_action = format_action('commented')
-            return interpolate(body,
-                action_prefix .. 'on commit {#.x_commit_id}: {.comment.body} - \x0308{#.comment.html_url}')
+            return {interpolate(body,
+                action_prefix .. 'on commit {#.x_commit_id}: {.comment.body} - \x0308{#.comment.html_url}')}
         else
             body.x_action = format_action(body.action)
-            return interpolate(body,
-                action_prefix .. 'comment on commit {#.x_commit_id}: {.comment.body} - \x0308{#.comment.html_url}')
+            return {interpolate(body,
+                action_prefix .. 'comment on commit {#.x_commit_id}: {.comment.body} - \x0308{#.comment.html_url}')}
         end
     end,
 
@@ -262,32 +284,32 @@ local formatters = {
         else
             body.x_action = format_action(body.action)
         end
-        return interpolate(body,
-            action_prefix .. 'issue #{#.issue.number}: \x02{.issue.title}\x02 - \x0308{#.issue.html_url}')
+        return {interpolate(body,
+            action_prefix .. 'issue #{#.issue.number}: \x02{.issue.title}\x02 - \x0308{#.issue.html_url}')}
     end,
 
     pull_request_review = function(body)
         if body.action == 'submitted' and body.review.state == 'approved' then
             body.x_action = format_action('approved')
             if body.review.body then
-                return interpolate(body,
+                return {interpolate(body,
                     action_prefix .. 'PR #{#.pull_request.number} ({.pull_request.title}): \z
-                    {.review.body} - \x0308{#.review.html_url}')
+                    {.review.body} - \x0308{#.review.html_url}')}
             else
-                return interpolate(body,
+                return {interpolate(body,
                     action_prefix .. 'PR #{#.pull_request.number} ({.pull_request.title}) \z
-                    - \x0308{#.review.html_url}')
+                    - \x0308{#.review.html_url}')}
             end
         else
             body.x_action = format_action(body.action)
             if body.review.body then
-                return interpolate(body,
+                return {interpolate(body,
                     action_prefix .. 'review on \z
-                    PR #{#.pull_request.number} ({.pull_request.title}): {.review.body} - \x0308{#.review.html_url}')
+                    PR #{#.pull_request.number} ({.pull_request.title}): {.review.body} - \x0308{#.review.html_url}')}
             else
-                return interpolate(body,
+                return {interpolate(body,
                     action_prefix .. 'review on \z
-                    PR #{#.pull_request.number} ({.pull_request.title}) - \x0308{#.review.html_url}')
+                    PR #{#.pull_request.number} ({.pull_request.title}) - \x0308{#.review.html_url}')}
             end
         end
     end,
@@ -295,14 +317,14 @@ local formatters = {
     pull_request_review_comment = function(body)
         if body.action == 'created' then
             body.x_action = format_action('commented')
-            return interpolate(body,
+            return {interpolate(body,
                 action_prefix .. 'on PR #{#.pull_request.number} ({.pull_request.title}): \z
-                {.comment.body} - \x0308{#.comment.html_url}')
+                {.comment.body} - \x0308{#.comment.html_url}')}
         else
             body.x_action = format_action(body.action)
-            return interpolate(body,
+            return {interpolate(body,
                 action_prefix .. 'comment on PR #{#.pull_request.number} ({.pull_request.title}): \z
-                {.comment.body} - \x0308{#.comment.html_url}')
+                {.comment.body} - \x0308{#.comment.html_url}')}
         end
     end,
 
@@ -312,8 +334,8 @@ local formatters = {
         else
             body.x_action = format_action(body.action)
         end
-        return interpolate(body,
-            action_prefix .. 'PR #{#.pull_request.number}: {.pull_request.title} - \x0308{#.pull_request.html_url}')
+        return {interpolate(body,
+            action_prefix .. 'PR #{#.pull_request.number}: {.pull_request.title} - \x0308{#.pull_request.html_url}')}
     end,
 
     check_suite = function(body)
@@ -332,14 +354,14 @@ local formatters = {
         else
             body.x_action = format_action(body.action)
         end
-        return interpolate(body,
-            common_prefix .. 'Check suite \x02{.check_suite.app.name}\x02 for {#.x_target} {#.x_commit_id}: {#.x_action}')
+        return {interpolate(body,
+            common_prefix .. 'Check suite \x02{.check_suite.app.name}\x02 for {#.x_target} {#.x_commit_id}: {#.x_action}')}
     end,
 
     -- Special event for r10k deployments
     deploy = function(body)
-        return interpolate(body,
-            common_prefix .. 'environment \x02{.environment}\x02 deployed')
+        return {interpolate(body,
+            common_prefix .. 'environment \x02{.environment}\x02 deployed')}
     end,
 }
 
@@ -428,12 +450,12 @@ local function do_notify(authid, delivery, event, raw_body)
     end
 
     -- If a message is called for, store it here
-    local message
+    local messages
     if project and project.events[full_event] then
         local formatter = formatters[event]
         if not formatter then
             status('github', 'Error: No formatter for enabled event: %s', event)
-            return
+            return reply_no_content()
         end
 
         for mute_id, mute in pairs(config.mutes) do
@@ -443,15 +465,18 @@ local function do_notify(authid, delivery, event, raw_body)
                 status('github', 'Mute %d expired', mute_id)
             elseif match_rule(mute.rule, full_event, body) then
                 status('github', 'Skipping %s %s due to mute %d', full_name, full_event, mute_id)
-                return
+                return reply_no_content()
             end
         end
 
-        message = formatter(body)
+        messages = formatter(body)
     end
 
-    if message then
-        send('NOTICE', project.channel, message)
+    if messages then
+        local n = math.min(project.push_limit, #messages)
+        for i = 1, n do
+            send('NOTICE', project.channel, messages[i])
+        end
         status('github', 'Announcing %s %s %s', full_name, full_event, project.channel)
     else
         status('github', 'Ignoring %s %s', full_name, full_event)
@@ -603,6 +628,8 @@ local help_strings = {
                   [pr=\x1fpr\x0f] [issue=\x1fissue\x0f] - add a mute'},
     unmute = {'unmute <\x1fid\x0f> - delete a mute'},
     mutes = {'mutes - list current mutes'},
+    get_push_limit = {'get_push_limit <repo> - get maximum number of messages per event'},
+    set_push_limit = {'set_push_limit <repo> <limit> - set maximum number of messages per event'},
 }
 
 --- Commands available to staff members chatting with the bot in private message
@@ -791,6 +818,34 @@ local irc_commands = {
         end
         return result
     end,
+
+    set_push_limit = function(repo, limit)
+        local project = config.projects[repo]
+        if not project then
+            return {'no such project'}
+        end
+
+        limit = math.tointeger(limit)
+        if not limit then
+            return {'invalid limit argument'}
+        end
+
+        if limit < 1 or 20 < limit then
+            return {'limit argument out of bounds'}
+        end
+
+        project.push_limit = limit
+        save_config(config)
+        return {'Push limit for ' .. repo .. ' is now ' .. project.push_limit}
+    end,
+
+    get_push_limit = function(repo)
+        local project = config.projects[repo]
+        if not project then
+            return {'no such project'}
+        end
+        return {'Push limit for ' .. repo .. ' is ' .. project.push_limit}
+    end,
 }
 
 --- Event handlers for incoming IRC messages
@@ -927,6 +982,7 @@ return {
                 channel = channel,
                 authorized = {},
                 events = {},
+                push_limit = 1,
             }
             save_config(config)
             join_channels()

@@ -55,6 +55,7 @@ Irc = {}
 --- @field authorized table<string, true>
 --- @field events table<string, true>
 --- @field channel string
+--- @field push_limit integer
 Project = {}
 
 --- @class (exact) Configuration
@@ -62,6 +63,8 @@ Project = {}
 --- @field credentials table<string, string>
 --- @field debug boolean
 --- @field projects table<string, Project>
+--- @field mutes table<integer, table>
+--- @field next_mute integer
 Configuration = {}
 
 --- @class Window
