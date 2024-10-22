@@ -610,7 +610,8 @@ local irc_commands = {
     --- List all the commands or provide help text for a specific command
     --- @type fun(command: string?): string[]
     help = function(command)
-        local doc = help_strings[command:lower()]
+        if command then command = command:lower() end
+        local doc = help_strings[command]
         if doc then
             return doc
         else
