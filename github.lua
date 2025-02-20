@@ -139,7 +139,7 @@ local function format_conclusion(conclusion)
         neutral = '\x02neutral\x0f',
         cancelled = '\x02cancelled\x0f',
         timed_out = '\x02\x0304timed out\x0f',
-        action_required = '\x02\x04action required\x0f',
+        action_required = '\x02action required\x0f',
         stale = '\x02stale\x0f',
     }
     return messages[conclusion] or conclusion
@@ -360,8 +360,10 @@ local formatters = {
 
     -- Special event for r10k deployments
     deploy = function(body)
+        local _, count = body.environment:gsub(" ", "")
+        body.x_count = count > 1 and (count .. " environments") or "1 environment"
         return {interpolate(body,
-            common_prefix .. 'environment \x02{.environment}\x02 deployed')}
+            common_prefix .. '{#.x_count} \x02\x0302deployed\x0f: \x02{.environment}\x02')}
     end,
 }
 
@@ -498,7 +500,7 @@ local routes = {
         local signature = headers['x-hub-signature-256']
 
         if not delivery then
-            delivery = sha256:digest(body)
+            delivery = hexbytes(sha256:digest(body))
         end
 
         if not (event and signature) then
